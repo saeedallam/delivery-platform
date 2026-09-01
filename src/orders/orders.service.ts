@@ -1,20 +1,15 @@
 import { Injectable } from '@nestjs/common';
-
 import { OrderStatus } from '../../generated/prisma/enums';
 import { UserRole } from '../auth/contracts/user-role.enum';
-
-import {
-  CreateOrderData,
-  CreateOrderItemData,
-} from './contracts/create-order-data.interface';
-
+import { CreateOrderData } from './contracts/create-order-data.interface';
 import { PersistOrderData } from './contracts/persist-order-data.interface';
-
 import { OrderRepository } from './order.repository';
-
 import { InvalidOrderTransitionError } from './errors/invalid-order-transition.error';
 import { ForbiddenOrderTransitionError } from './errors/forbidden-order-transition.error';
 import { OrderNotFoundError } from './errors/order-not-found.error';
+import { ProductsService } from 'src/catalog/products.service';
+import { MixedCurrencyOrderError } from './errors/mixed-currency-order.error';
+import { Currency } from 'src/catalog/contracts/currency.enum';
 
 export const allowedTransitions: Record<OrderStatus, OrderStatus[]> = {
   [OrderStatus.PENDING]: [OrderStatus.CONFIRMED, OrderStatus.CANCELLED],
@@ -54,7 +49,10 @@ const transitionActors: Partial<
 
 @Injectable()
 export class OrdersService {
-  constructor(private readonly orderRepository: OrderRepository) {}
+  constructor(
+    private readonly orderRepository: OrderRepository,
+    private readonly productsService: ProductsService
+  ) {}
 
   canTransition(currentStatus: OrderStatus, nextStatus: OrderStatus): boolean {
     return allowedTransitions[currentStatus].includes(nextStatus);
@@ -89,21 +87,61 @@ export class OrdersService {
   }
 
   async createOrder(data: CreateOrderData) {
-    const totalAmountInMinorUnits = this.calculateTotal(data.items);
+    const products = await Promise.all(
+      data.items.map((item) =>
+        this.productsService.getProductForOrder(item.productId)
+      )
+    );
+
+    const currency = this.validateCurrency(products);
+
+    const trustedItems = data.items.map((item, index) => ({
+      productId: item.productId,
+      quantity: item.quantity,
+      unitPriceInMinorUnits: products[index].priceInMinorUnits,
+    }));
+
+    const totalAmountInMinorUnits = this.calculateTotal(trustedItems);
 
     const orderData: PersistOrderData = {
-      ...data,
+      userId: data.userId,
+      currency,
+      items: trustedItems,
       totalAmountInMinorUnits,
     };
 
     return this.orderRepository.createOrder(orderData);
   }
 
-  private calculateTotal(items: CreateOrderItemData[]): number {
+  private calculateTotal(
+    items: {
+      productId: string;
+      quantity: number;
+      unitPriceInMinorUnits: number;
+    }[]
+  ): number {
     return items.reduce(
       (sum, item) => sum + item.quantity * item.unitPriceInMinorUnits,
       0
     );
+  }
+
+  private validateCurrency(
+    products: {
+      currency: Currency;
+    }[]
+  ): Currency {
+    const currency = products[0].currency;
+
+    const hasMixedCurrencies = products.some(
+      (product) => product.currency !== currency
+    );
+
+    if (hasMixedCurrencies) {
+      throw new MixedCurrencyOrderError();
+    }
+
+    return currency;
   }
 
   async changeStatus(

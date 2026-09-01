@@ -1,10 +1,20 @@
-import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Param,
+  Patch,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 
 import { Request } from 'express';
 
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AuthenticatedUser } from '../auth/strategies/jwt.strategy';
+
 import { CreateOrderDto } from './dto/create-order.dto';
+import { ChangeOrderStatusDto } from './dto/change-order-status.dto';
 import { OrdersService } from './orders.service';
 
 interface AuthenticatedRequest extends Request {
@@ -14,6 +24,7 @@ interface AuthenticatedRequest extends Request {
 @Controller('orders')
 export class OrdersController {
   constructor(private readonly ordersService: OrdersService) {}
+
   @UseGuards(JwtAuthGuard)
   @Post()
   async createOrder(
@@ -22,8 +33,21 @@ export class OrdersController {
   ) {
     return this.ordersService.createOrder({
       userId: req.user.userId,
-      currency: dto.currency,
       items: dto.items,
     });
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Patch(':orderId/status')
+  async changeStatus(
+    @Param('orderId') orderId: string,
+    @Body() dto: ChangeOrderStatusDto,
+    @Req() req: AuthenticatedRequest
+  ) {
+    return this.ordersService.changeStatus(
+      orderId,
+      dto.nextStatus,
+      req.user.role
+    );
   }
 }

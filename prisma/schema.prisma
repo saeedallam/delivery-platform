@@ -102,3 +102,15 @@ model Product {
   @@index([currency])
   @@map("products")
 }
+
+model Inventory {
+  id               String @id @default(uuid())
+  productId        String @unique
+  quantity         Int    @default(0)
+  reservedQuantity  Int    @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("inventory")
+}
