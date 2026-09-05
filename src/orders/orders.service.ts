@@ -10,6 +10,10 @@ import { OrderNotFoundError } from './errors/order-not-found.error';
 import { ProductsService } from 'src/catalog/products.service';
 import { MixedCurrencyOrderError } from './errors/mixed-currency-order.error';
 import { Currency } from 'src/catalog/contracts/currency.enum';
+import { OrderPaymentDetails } from './contracts/order-payment-details.interface';
+import { ForbiddenOrderAccessError } from './errors/forbidden-order-access.error';
+import { OrderNotPayableError } from './errors/order-not-payable.error';
+import { OrderMappingError } from './errors/order-mapping.error';
 
 export const allowedTransitions: Record<OrderStatus, OrderStatus[]> = {
   [OrderStatus.PENDING]: [OrderStatus.CONFIRMED, OrderStatus.CANCELLED],
@@ -86,7 +90,7 @@ export class OrdersService {
     return nextStatus;
   }
 
-  async createOrder(data: CreateOrderData) {
+  async prepareOrderData(data: CreateOrderData): Promise<PersistOrderData> {
     const products = await Promise.all(
       data.items.map((item) =>
         this.productsService.getProductForOrder(item.productId)
@@ -103,14 +107,46 @@ export class OrdersService {
 
     const totalAmountInMinorUnits = this.calculateTotal(trustedItems);
 
-    const orderData: PersistOrderData = {
+    return {
       userId: data.userId,
       currency,
       items: trustedItems,
       totalAmountInMinorUnits,
     };
+  }
 
-    return this.orderRepository.createOrder(orderData);
+  async getOrderForPayment(
+    orderId: string,
+    userId: string
+  ): Promise<OrderPaymentDetails> {
+    const order = await this.orderRepository.findById(orderId);
+
+    if (!order) {
+      throw new OrderNotFoundError(orderId);
+    }
+
+    if (order.userId !== userId) {
+      throw new ForbiddenOrderAccessError(orderId);
+    }
+
+    if (order.status !== OrderStatus.PENDING) {
+      throw new OrderNotPayableError(orderId, order.status);
+    }
+
+    const currency = Object.values(Currency).find(
+      (value) => value === order.currency
+    );
+
+    if (!currency) {
+      throw new OrderMappingError(orderId, order.currency);
+    }
+
+    return {
+      id: order.id,
+      userId: order.userId,
+      totalAmountInMinorUnits: order.totalAmountInMinorUnits,
+      currency,
+    };
   }
 
   private calculateTotal(

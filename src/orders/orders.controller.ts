@@ -16,6 +16,7 @@ import { AuthenticatedUser } from '../auth/strategies/jwt.strategy';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { ChangeOrderStatusDto } from './dto/change-order-status.dto';
 import { OrdersService } from './orders.service';
+import { PlaceOrderUseCase } from './application/place-order.use-case';
 
 interface AuthenticatedRequest extends Request {
   user: AuthenticatedUser;
@@ -23,7 +24,10 @@ interface AuthenticatedRequest extends Request {
 
 @Controller('orders')
 export class OrdersController {
-  constructor(private readonly ordersService: OrdersService) {}
+  constructor(
+    private readonly ordersService: OrdersService,
+    private readonly placeOrderUseCase: PlaceOrderUseCase
+  ) {}
 
   @UseGuards(JwtAuthGuard)
   @Post()
@@ -31,7 +35,7 @@ export class OrdersController {
     @Req() req: AuthenticatedRequest,
     @Body() dto: CreateOrderDto
   ) {
-    return this.ordersService.createOrder({
+    return this.placeOrderUseCase.execute({
       userId: req.user.userId,
       items: dto.items,
     });

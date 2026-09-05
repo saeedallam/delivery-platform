@@ -7,27 +7,30 @@ import { InventoryRepository } from './inventory.repository';
 export class InventoryService {
   constructor(private readonly inventoryRepository: InventoryRepository) {}
 
-  async reserveStock(productId: string, quantity: number) {
-    const inventory = await this.inventoryRepository.reserveStock(
-      productId,
-      quantity
-    );
-
-    if (inventory) {
-      return inventory;
+  interpretReservationResult(
+    productId: string,
+    requestedQuantity: number,
+    reservationSucceeded: boolean,
+    existingInventory: {
+      quantity: number;
+      reservedQuantity: number;
+    } | null
+  ): void {
+    if (reservationSucceeded) {
+      return;
     }
-
-    const existingInventory =
-      await this.inventoryRepository.findByProductId(productId);
 
     if (!existingInventory) {
       throw new InventoryNotFoundError(productId);
     }
 
+    const availableQuantity =
+      existingInventory.quantity - existingInventory.reservedQuantity;
+
     throw new InsufficientStockError(
       productId,
-      quantity,
-      existingInventory.quantity - existingInventory.reservedQuantity
+      requestedQuantity,
+      availableQuantity
     );
   }
 }

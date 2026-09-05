@@ -9,10 +9,19 @@ import { OrderRepository } from './order.repository';
 
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { InventoryModule } from 'src/inventory/inventory.module';
+import { PlaceOrderUseCase } from './application/place-order.use-case';
 
 @Module({
-  imports: [PrismaModule, CatalogModule],
+  imports: [PrismaModule, CatalogModule, InventoryModule],
   controllers: [OrdersController],
-  providers: [OrdersService, OrderRepository, JwtAuthGuard, RolesGuard],
+  providers: [
+    OrdersService,
+    OrderRepository,
+    PlaceOrderUseCase,
+    JwtAuthGuard,
+    RolesGuard,
+  ],
+  exports: [OrdersService],
 })
 export class OrdersModule {}

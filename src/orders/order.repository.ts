@@ -3,36 +3,37 @@ import { PrismaService } from '../prisma/prisma.service';
 
 import { PersistOrderData } from './contracts/persist-order-data.interface';
 import { OrderStatus } from 'generated/prisma/enums';
+import { Prisma } from 'generated/prisma/client';
 import { OrderStateConflictError } from './errors/order-state-conflict.error';
 
 @Injectable()
 export class OrderRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async createOrder(data: PersistOrderData) {
-    return this.prisma.$transaction(async (tx) => {
-      const order = await tx.order.create({
-        data: {
-          userId: data.userId,
-          totalAmountInMinorUnits: data.totalAmountInMinorUnits,
-          currency: data.currency,
+  async createOrder(data: PersistOrderData, tx?: Prisma.TransactionClient) {
+    const client = tx ?? this.prisma;
 
-          items: {
-            create: data.items.map((item) => ({
-              productId: item.productId,
-              quantity: item.quantity,
-              unitPriceInMinorUnits: item.unitPriceInMinorUnits,
-            })),
-          },
+    const order = await client.order.create({
+      data: {
+        userId: data.userId,
+        totalAmountInMinorUnits: data.totalAmountInMinorUnits,
+        currency: data.currency,
+
+        items: {
+          create: data.items.map((item) => ({
+            productId: item.productId,
+            quantity: item.quantity,
+            unitPriceInMinorUnits: item.unitPriceInMinorUnits,
+          })),
         },
+      },
 
-        include: {
-          items: true,
-        },
-      });
-
-      return order;
+      include: {
+        items: true,
+      },
     });
+
+    return order;
   }
 
   async findById(id: string) {
