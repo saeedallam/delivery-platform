@@ -1,4 +1,5 @@
-import { Currency } from '../../catalog/contracts/currency.enum';
+import type { Currency } from '../../catalog/contracts/currency.enum';
+import type { PaymentProviderEvent } from '../contracts/payment-provider-event.type';
 
 export const PAYMENT_GATEWAY = Symbol('PAYMENT_GATEWAY');
 
@@ -19,4 +20,9 @@ export interface PaymentGateway {
   createCheckoutSession(
     data: CreateCheckoutSessionData
   ): Promise<CheckoutSessionResult>;
+
+  verifyAndParseWebhookEvent(
+    rawBody: Buffer,
+    signature: string
+  ): PaymentProviderEvent;
 }

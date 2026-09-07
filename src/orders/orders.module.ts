@@ -22,6 +22,6 @@ import { PlaceOrderUseCase } from './application/place-order.use-case';
     JwtAuthGuard,
     RolesGuard,
   ],
-  exports: [OrdersService],
+  exports: [OrdersService, OrderRepository],
 })
 export class OrdersModule {}

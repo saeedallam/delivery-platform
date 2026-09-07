@@ -36,9 +36,13 @@ export class OrderRepository {
     return order;
   }
 
-  async findById(id: string) {
-    return this.prisma.order.findUnique({
-      where: { id },
+  async findById(id: string, tx?: Prisma.TransactionClient) {
+    const client = tx ?? this.prisma;
+
+    return client.order.findUnique({
+      where: {
+        id,
+      },
 
       include: {
         items: true,

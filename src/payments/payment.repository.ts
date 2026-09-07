@@ -8,6 +8,12 @@ import { PaymentStatus } from './contracts/payment-status.enum';
 import { Payment } from './domain/payment.interface';
 import { PaymentMappingError } from './errors/payment-mapping.error';
 import { PaymentStateConflictError } from './errors/payment-state-conflict.error';
+import { MarkPaymentSucceededData } from './contracts/mark-payment-succeeded-data.interface';
+import {
+  MarkPaymentExpiredData,
+  MarkPaymentExpiredResult,
+} from './contracts/mark-payment-expired-data.interface';
+import { Prisma } from 'generated/prisma/client';
 
 interface PaymentPersistenceRecord {
   id: string;
@@ -66,8 +72,19 @@ export class PaymentRepository {
     const result = await this.prisma.payment.updateMany({
       where: {
         id: paymentId,
-        status: PaymentStatus.PENDING,
+
+        OR: [
+          {
+            status: PaymentStatus.PENDING,
+            providerSessionId: null,
+          },
+          {
+            status: PaymentStatus.PROCESSING,
+            providerSessionId,
+          },
+        ],
       },
+
       data: {
         providerSessionId,
         expiresAt,
@@ -76,7 +93,7 @@ export class PaymentRepository {
     });
 
     if (result.count !== 1) {
-      throw new PaymentStateConflictError(paymentId, PaymentStatus.PENDING);
+      throw new PaymentStateConflictError(paymentId);
     }
 
     const payment = await this.prisma.payment.findUnique({
@@ -86,10 +103,112 @@ export class PaymentRepository {
     });
 
     if (!payment) {
-      throw new PaymentStateConflictError(paymentId, PaymentStatus.PENDING);
+      throw new PaymentStateConflictError(paymentId);
     }
 
     return this.mapToPayment(payment);
+  }
+
+  async markSucceeded(data: MarkPaymentSucceededData): Promise<Payment> {
+    const result = await this.prisma.payment.updateMany({
+      where: {
+        id: data.paymentId,
+        amountInMinorUnits: data.amountInMinorUnits,
+        currency: data.currency,
+
+        OR: [
+          {
+            status: PaymentStatus.PROCESSING,
+            providerSessionId: data.providerSessionId,
+            providerPaymentId: null,
+          },
+          {
+            status: PaymentStatus.SUCCEEDED,
+            providerSessionId: data.providerSessionId,
+            providerPaymentId: data.providerPaymentId,
+          },
+        ],
+      },
+
+      data: {
+        status: PaymentStatus.SUCCEEDED,
+        providerPaymentId: data.providerPaymentId,
+        paidAt: data.paidAt,
+        failureReason: null,
+      },
+    });
+
+    if (result.count !== 1) {
+      throw new PaymentStateConflictError(data.paymentId);
+    }
+
+    const payment = await this.prisma.payment.findUnique({
+      where: {
+        id: data.paymentId,
+      },
+    });
+
+    if (!payment) {
+      throw new PaymentStateConflictError(data.paymentId);
+    }
+
+    return this.mapToPayment(payment);
+  }
+
+  async markExpired(
+    data: MarkPaymentExpiredData,
+    tx?: Prisma.TransactionClient
+  ): Promise<MarkPaymentExpiredResult> {
+    const client = tx ?? this.prisma;
+
+    const result = await client.payment.updateMany({
+      where: {
+        id: data.paymentId,
+        status: PaymentStatus.PROCESSING,
+        providerSessionId: data.providerSessionId,
+        providerPaymentId: null,
+        amountInMinorUnits: data.amountInMinorUnits,
+        currency: data.currency,
+      },
+
+      data: {
+        status: PaymentStatus.EXPIRED,
+        failureReason: 'Stripe Checkout Session expired',
+      },
+    });
+
+    const payment = await client.payment.findUnique({
+      where: {
+        id: data.paymentId,
+      },
+    });
+
+    if (!payment) {
+      throw new PaymentStateConflictError(data.paymentId);
+    }
+
+    if (result.count === 1) {
+      return {
+        payment: this.mapToPayment(payment),
+        transitioned: true,
+      };
+    }
+
+    const isSameExpiredPayment =
+      payment.status === PaymentStatus.EXPIRED &&
+      payment.providerSessionId === data.providerSessionId &&
+      payment.providerPaymentId === null &&
+      payment.amountInMinorUnits === data.amountInMinorUnits &&
+      payment.currency === data.currency;
+
+    if (!isSameExpiredPayment) {
+      throw new PaymentStateConflictError(data.paymentId);
+    }
+
+    return {
+      payment: this.mapToPayment(payment),
+      transitioned: false,
+    };
   }
 
   private mapToPayment(payment: PaymentPersistenceRecord): Payment {

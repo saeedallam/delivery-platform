@@ -49,4 +49,41 @@ export class InventoryRepository {
 
     return rows[0] ?? null;
   }
+
+  async releaseStock(
+    productId: string,
+    quantity: number,
+    tx?: Prisma.TransactionClient
+  ) {
+    const client = tx ?? this.prisma;
+
+    const rows = await client.$queryRaw<
+      {
+        id: string;
+        productId: string;
+        quantity: number;
+        reservedQuantity: number;
+        createdAt: Date;
+        updatedAt: Date;
+      }[]
+    >`
+    UPDATE "inventory"
+    SET
+      "reservedQuantity" = "reservedQuantity" - ${quantity},
+      "updatedAt" = CURRENT_TIMESTAMP
+    WHERE
+      "productId" = ${productId}
+      AND ${quantity} > 0
+      AND "reservedQuantity" >= ${quantity}
+    RETURNING
+      "id",
+      "productId",
+      "quantity",
+      "reservedQuantity",
+      "createdAt",
+      "updatedAt";
+  `;
+
+    return rows[0] ?? null;
+  }
 }

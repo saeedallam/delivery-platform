@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InsufficientStockError } from './errors/insufficient-stock.error';
 import { InventoryNotFoundError } from './errors/inventory-not-found.error';
 import { InventoryRepository } from './inventory.repository';
+import { InventoryReleaseConflictError } from './errors/inventory-release-conflict.error';
 
 @Injectable()
 export class InventoryService {
@@ -31,6 +32,29 @@ export class InventoryService {
       productId,
       requestedQuantity,
       availableQuantity
+    );
+  }
+
+  interpretReleaseResult(
+    productId: string,
+    requestedQuantity: number,
+    releaseSucceeded: boolean,
+    existingInventory: {
+      reservedQuantity: number;
+    } | null
+  ): void {
+    if (releaseSucceeded) {
+      return;
+    }
+
+    if (!existingInventory) {
+      throw new InventoryNotFoundError(productId);
+    }
+
+    throw new InventoryReleaseConflictError(
+      productId,
+      requestedQuantity,
+      existingInventory.reservedQuantity
     );
   }
 }

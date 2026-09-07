@@ -1,9 +1,7 @@
-import { PaymentStatus } from '../contracts/payment-status.enum';
-
 export class PaymentStateConflictError extends Error {
-  constructor(paymentId: string, expectedStatus: PaymentStatus) {
+  constructor(paymentId: string) {
     super(
-      `Payment ${paymentId} is no longer in the expected ${expectedStatus} state`
+      `Payment ${paymentId} cannot be updated because its state or provider data does not match`
     );
 
     this.name = 'PaymentStateConflictError';
