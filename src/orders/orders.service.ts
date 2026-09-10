@@ -1,19 +1,24 @@
 import { Injectable } from '@nestjs/common';
 import { OrderStatus } from '../../generated/prisma/enums';
+
 import { UserRole } from '../auth/contracts/user-role.enum';
+
 import { CreateOrderData } from './contracts/create-order-data.interface';
 import { PersistOrderData } from './contracts/persist-order-data.interface';
+import { OrderPaymentDetails } from './contracts/order-payment-details.interface';
+
 import { OrderRepository } from './order.repository';
+
 import { InvalidOrderTransitionError } from './errors/invalid-order-transition.error';
 import { ForbiddenOrderTransitionError } from './errors/forbidden-order-transition.error';
 import { OrderNotFoundError } from './errors/order-not-found.error';
-import { ProductsService } from 'src/catalog/products.service';
 import { MixedCurrencyOrderError } from './errors/mixed-currency-order.error';
-import { Currency } from 'src/catalog/contracts/currency.enum';
-import { OrderPaymentDetails } from './contracts/order-payment-details.interface';
 import { ForbiddenOrderAccessError } from './errors/forbidden-order-access.error';
 import { OrderNotPayableError } from './errors/order-not-payable.error';
 import { OrderMappingError } from './errors/order-mapping.error';
+
+import { ProductsService } from 'src/catalog/products.service';
+import { Currency } from 'src/catalog/contracts/currency.enum';
 
 export const allowedTransitions: Record<OrderStatus, OrderStatus[]> = {
   [OrderStatus.PENDING]: [OrderStatus.CONFIRMED, OrderStatus.CANCELLED],
@@ -40,14 +45,6 @@ const transitionActors: Partial<
   [OrderStatus.CONFIRMED]: {
     [OrderStatus.PREPARING]: UserRole.MERCHANT,
     [OrderStatus.CANCELLED]: UserRole.CUSTOMER,
-  },
-
-  [OrderStatus.PREPARING]: {
-    [OrderStatus.OUT_FOR_DELIVERY]: UserRole.MERCHANT,
-  },
-
-  [OrderStatus.OUT_FOR_DELIVERY]: {
-    [OrderStatus.DELIVERED]: UserRole.DRIVER,
   },
 };
 

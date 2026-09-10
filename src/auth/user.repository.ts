@@ -38,6 +38,25 @@ export class UserRepository {
     }
   }
 
+  async findById(id: string): Promise<User | null> {
+    try {
+      const user = await this.prisma.user.findUnique({
+        where: { id },
+      });
+
+      return user ? this.mapToUser(user) : null;
+    } catch (error: unknown) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P1001'
+      ) {
+        throw new DatabaseUnavailableError();
+      }
+
+      throw error;
+    }
+  }
+
   async createUser(userData: CreateUserData): Promise<User> {
     try {
       const user = await this.prisma.user.create({

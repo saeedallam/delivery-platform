@@ -34,6 +34,14 @@ import { PaymentCheckoutNotAllowedError } from '../../payments/errors/payment-ch
 import { PaymentProviderError } from '../../payments/errors/payment-provider.error';
 import { PaymentStateConflictError } from '../../payments/errors/payment-state-conflict.error';
 
+import { DeliveryAlreadyExistsError } from '../../deliveries/errors/delivery-already-exists.error';
+import { DeliveryNotFoundError } from '../../deliveries/errors/delivery-not-found.error';
+import { DeliveryStateConflictError } from '../../deliveries/errors/delivery-state-conflict.error';
+import { DriverNotFoundError } from '../../deliveries/errors/driver-not-found.error';
+import { ForbiddenDeliveryAccessError } from '../../deliveries/errors/forbidden-delivery-access.error';
+import { InvalidDriverRoleError } from '../../deliveries/errors/invalid-driver-role.error';
+import { OrderNotReadyForDeliveryError } from '../../deliveries/errors/order-not-ready-for-delivery.error';
+
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(GlobalExceptionFilter.name);
@@ -59,7 +67,8 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 
     if (
       exception instanceof ForbiddenOrderTransitionError ||
-      exception instanceof ForbiddenOrderAccessError
+      exception instanceof ForbiddenOrderAccessError ||
+      exception instanceof ForbiddenDeliveryAccessError
     ) {
       return response.status(HttpStatus.FORBIDDEN).json({
         statusCode: HttpStatus.FORBIDDEN,
@@ -70,7 +79,9 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     if (
       exception instanceof OrderNotFoundError ||
       exception instanceof ProductNotFoundError ||
-      exception instanceof InventoryNotFoundError
+      exception instanceof InventoryNotFoundError ||
+      exception instanceof DeliveryNotFoundError ||
+      exception instanceof DriverNotFoundError
     ) {
       return response.status(HttpStatus.NOT_FOUND).json({
         statusCode: HttpStatus.NOT_FOUND,
@@ -105,7 +116,11 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       exception instanceof InventoryReleaseConflictError ||
       exception instanceof OrderNotPayableError ||
       exception instanceof PaymentCheckoutNotAllowedError ||
-      exception instanceof PaymentStateConflictError
+      exception instanceof PaymentStateConflictError ||
+      exception instanceof DeliveryAlreadyExistsError ||
+      exception instanceof OrderNotReadyForDeliveryError ||
+      exception instanceof InvalidDriverRoleError ||
+      exception instanceof DeliveryStateConflictError
     ) {
       return response.status(HttpStatus.CONFLICT).json({
         statusCode: HttpStatus.CONFLICT,

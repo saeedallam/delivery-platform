@@ -1,4 +1,8 @@
-import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import * as argon2 from 'argon2';
 import { CreateUserData } from './contracts/create-user-data.interface';
 import { RegisterUserDto } from './dto/register-user.dto';
@@ -11,13 +15,14 @@ import { InvalidRefreshTokenError } from './errors/invalid-refresh-token.error';
 import { UserRepository } from './user.repository';
 import { TokenService } from './token.service';
 import { RefreshSessionRepository } from './repositories/refresh-session.repository';
+import { UserRole } from './contracts/user-role.enum';
 
 @Injectable()
 export class AuthService {
   constructor(
     private readonly userRepository: UserRepository,
     private readonly tokenService: TokenService,
-    private readonly refreshSessionRepository: RefreshSessionRepository,
+    private readonly refreshSessionRepository: RefreshSessionRepository
   ) {}
 
   async register(dto: RegisterUserDto): Promise<UserResponseDto> {
@@ -49,15 +54,25 @@ export class AuthService {
     const user = await this.userRepository.findByEmail(dto.email);
     if (!user) throw new InvalidCredentialsError();
 
-    const isPasswordValid = await argon2.verify(user.passwordHash, dto.password);
+    const isPasswordValid = await argon2.verify(
+      user.passwordHash,
+      dto.password
+    );
     if (!isPasswordValid) throw new InvalidCredentialsError();
 
-    const accessToken = await this.tokenService.generateAccessToken(user.id, user.role);
+    const accessToken = await this.tokenService.generateAccessToken(
+      user.id,
+      user.role
+    );
     const refreshToken = this.tokenService.generateRefreshToken();
     const refreshTokenHash = this.tokenService.hashRefreshToken(refreshToken);
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
-    await this.refreshSessionRepository.create(user.id, refreshTokenHash, expiresAt);
+    await this.refreshSessionRepository.create(
+      user.id,
+      refreshTokenHash,
+      expiresAt
+    );
 
     return {
       id: user.id,
@@ -67,10 +82,25 @@ export class AuthService {
       refreshToken,
     };
   }
+  async getUserIdentity(
+    userId: string
+  ): Promise<{ id: string; role: UserRole } | null> {
+    const user = await this.userRepository.findById(userId);
+
+    if (!user) {
+      return null;
+    }
+
+    return {
+      id: user.id,
+      role: user.role,
+    };
+  }
 
   async refresh(refreshToken: string) {
     const tokenHash = this.tokenService.hashRefreshToken(refreshToken);
-    const session = await this.refreshSessionRepository.findByTokenHash(tokenHash);
+    const session =
+      await this.refreshSessionRepository.findByTokenHash(tokenHash);
 
     if (!session || session.revokedAt || session.expiresAt <= new Date()) {
       throw new InvalidRefreshTokenError();
@@ -78,18 +108,19 @@ export class AuthService {
 
     const newAccessToken = await this.tokenService.generateAccessToken(
       session.user.id,
-      session.user.role,
+      session.user.role
     );
 
     const newRefreshToken = this.tokenService.generateRefreshToken();
-    const newRefreshTokenHash = this.tokenService.hashRefreshToken(newRefreshToken);
+    const newRefreshTokenHash =
+      this.tokenService.hashRefreshToken(newRefreshToken);
     const newExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
     const rotated = await this.refreshSessionRepository.rotate(
       session.id,
       session.user.id,
       newRefreshTokenHash,
-      newExpiresAt,
+      newExpiresAt
     );
 
     if (!rotated) throw new InvalidRefreshTokenError();

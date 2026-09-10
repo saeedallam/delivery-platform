@@ -44,6 +44,13 @@ enum PaymentStatus {
   EXPIRED
 }
 
+enum DeliveryStatus {
+  PENDING_ASSIGNMENT
+  ASSIGNED
+  PICKED_UP
+  DELIVERED
+  CANCELLED
+}
 
 model User {
   id              String           @id @default(uuid())
@@ -72,7 +79,7 @@ model Order {
   status OrderStatus @default(PENDING)
 
   totalAmountInMinorUnits Int
-  currency Currency @default(USD)
+  currency                Currency @default(USD)
 
   items OrderItem[]
 
@@ -104,7 +111,7 @@ model Product {
   name              String
   priceInMinorUnits Int
   currency          Currency @default(USD)
-  isActive          Boolean @default(true)
+  isActive          Boolean  @default(true)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
@@ -116,7 +123,7 @@ model Inventory {
   id               String @id @default(uuid())
   productId        String @unique
   quantity         Int    @default(0)
-  reservedQuantity  Int    @default(0)
+  reservedQuantity Int    @default(0)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -125,23 +132,43 @@ model Inventory {
 }
 
 model Payment {
-  id                    String        @id @default(uuid())
-  orderId               String        @unique
-  userId                String
-  amountInMinorUnits    Int
-  currency              Currency
-  status                PaymentStatus @default(PENDING)
+  id                 String        @id @default(uuid())
+  orderId            String        @unique
+  userId             String
+  amountInMinorUnits Int
+  currency           Currency
+  status             PaymentStatus @default(PENDING)
 
-  providerSessionId     String?       @unique
-  providerPaymentId     String?       @unique
-  failureReason         String?
-  expiresAt             DateTime?
-  paidAt                DateTime?
+  providerSessionId String?   @unique
+  providerPaymentId String?   @unique
+  failureReason     String?
+  expiresAt         DateTime?
+  paidAt            DateTime?
 
-  createdAt             DateTime      @default(now())
-  updatedAt             DateTime      @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([userId])
   @@index([status])
   @@map("payments")
+}
+
+model Delivery {
+  id       String  @id @default(uuid())
+  orderId  String  @unique
+  driverId String?
+
+  status DeliveryStatus @default(PENDING_ASSIGNMENT)
+
+  assignedAt  DateTime?
+  pickedUpAt  DateTime?
+  deliveredAt DateTime?
+  cancelledAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([driverId])
+  @@index([status])
+  @@map("deliveries")
 }

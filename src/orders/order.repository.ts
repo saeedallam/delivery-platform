@@ -53,9 +53,12 @@ export class OrderRepository {
   async updateStatus(
     id: string,
     currentStatus: OrderStatus,
-    newStatus: OrderStatus
+    newStatus: OrderStatus,
+    tx?: Prisma.TransactionClient
   ) {
-    const result = await this.prisma.order.updateMany({
+    const client = tx ?? this.prisma;
+
+    const result = await client.order.updateMany({
       where: {
         id,
         status: currentStatus,
@@ -69,7 +72,7 @@ export class OrderRepository {
       throw new OrderStateConflictError(id, currentStatus);
     }
 
-    return this.prisma.order.findUnique({
+    return client.order.findUnique({
       where: { id },
       include: {
         items: true,
