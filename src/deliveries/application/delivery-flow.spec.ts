@@ -1,5 +1,4 @@
 import { Test } from '@nestjs/testing';
-import { EventEmitter2 } from '@nestjs/event-emitter';
 
 import { OrderStatus } from 'generated/prisma/enums';
 
@@ -11,10 +10,12 @@ import { OrderRepository } from '../../orders/order.repository';
 import { OrderNotFoundError } from '../../orders/errors/order-not-found.error';
 import { OrderStateConflictError } from '../../orders/errors/order-state-conflict.error';
 
+import { OutboxRepository } from '../../outbox/outbox.repository';
+import type { CreateOutboxEventData } from '../../outbox/contracts/create-outbox-event-data.interface';
+
 import { DeliveryRepository } from '../delivery.repository';
 import { DeliveryStatus } from '../contracts/delivery-status.enum';
 import { DELIVERY_COMPLETED_EVENT } from '../contracts/delivery-completed-event.interface';
-import type { DeliveryCompletedEvent } from '../contracts/delivery-completed-event.interface';
 
 import { DeliveryAlreadyExistsError } from '../errors/delivery-already-exists.error';
 import { DeliveryNotFoundError } from '../errors/delivery-not-found.error';
@@ -49,8 +50,8 @@ describe('Delivery flow', () => {
     $transaction: jest.Mock;
   };
 
-  let eventEmitter: {
-    emit: jest.Mock;
+  let outboxRepository: {
+    create: jest.Mock;
   };
 
   let authService: {
@@ -87,8 +88,8 @@ describe('Delivery flow', () => {
       ),
     };
 
-    eventEmitter = {
-      emit: jest.fn(),
+    outboxRepository = {
+      create: jest.fn().mockResolvedValue(undefined),
     };
 
     authService = {
@@ -133,8 +134,8 @@ describe('Delivery flow', () => {
           useValue: prisma,
         },
         {
-          provide: EventEmitter2,
-          useValue: eventEmitter,
+          provide: OutboxRepository,
+          useValue: outboxRepository,
         },
         {
           provide: AuthService,
@@ -372,11 +373,20 @@ describe('Delivery flow', () => {
       );
 
       if (operation === 'pickup') {
-        expect(eventEmitter.emit).not.toHaveBeenCalled();
+        expect(outboxRepository.create).not.toHaveBeenCalled();
+      } else {
+        expect(outboxRepository.create).toHaveBeenCalledTimes(1);
+
+        expect(outboxRepository.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            type: DELIVERY_COMPLETED_EVENT,
+          }),
+          transactionClient
+        );
       }
     });
 
-    it('rejects a missing delivery without writes or events', async () => {
+    it('rejects a missing delivery without writes or outbox events', async () => {
       deliveryRepository.findById.mockResolvedValue(null);
 
       await expect(execute()).rejects.toThrow(DeliveryNotFoundError);
@@ -384,11 +394,11 @@ describe('Delivery flow', () => {
       expect(orderRepository.findById).not.toHaveBeenCalled();
       expect(writeDelivery()).not.toHaveBeenCalled();
       expect(orderRepository.updateStatus).not.toHaveBeenCalled();
-      expect(eventEmitter.emit).not.toHaveBeenCalled();
+      expect(outboxRepository.create).not.toHaveBeenCalled();
     });
 
     it.each(['another-driver', null])(
-      'rejects delivery assigned to %s without writes or events',
+      'rejects delivery assigned to %s without writes or outbox events',
       async (assignedDriverId) => {
         deliveryRepository.findById.mockResolvedValue({
           id: deliveryId,
@@ -402,21 +412,21 @@ describe('Delivery flow', () => {
         expect(orderRepository.findById).not.toHaveBeenCalled();
         expect(writeDelivery()).not.toHaveBeenCalled();
         expect(orderRepository.updateStatus).not.toHaveBeenCalled();
-        expect(eventEmitter.emit).not.toHaveBeenCalled();
+        expect(outboxRepository.create).not.toHaveBeenCalled();
       }
     );
 
-    it('rejects a missing order without writes or events', async () => {
+    it('rejects a missing order without writes or outbox events', async () => {
       orderRepository.findById.mockResolvedValue(null);
 
       await expect(execute()).rejects.toThrow(OrderNotFoundError);
 
       expect(writeDelivery()).not.toHaveBeenCalled();
       expect(orderRepository.updateStatus).not.toHaveBeenCalled();
-      expect(eventEmitter.emit).not.toHaveBeenCalled();
+      expect(outboxRepository.create).not.toHaveBeenCalled();
     });
 
-    it('rejects a repeated operation without writes or events', async () => {
+    it('rejects a repeated operation without writes or outbox events', async () => {
       orderRepository.findById.mockResolvedValue({
         id: orderId,
         userId,
@@ -432,10 +442,10 @@ describe('Delivery flow', () => {
 
       expect(writeDelivery()).not.toHaveBeenCalled();
       expect(orderRepository.updateStatus).not.toHaveBeenCalled();
-      expect(eventEmitter.emit).not.toHaveBeenCalled();
+      expect(outboxRepository.create).not.toHaveBeenCalled();
     });
 
-    it('does not update order or publish when delivery update fails', async () => {
+    it('does not update order or save an event when delivery update fails', async () => {
       const error = new DeliveryStateConflictError(deliveryId);
 
       writeDelivery().mockRejectedValue(error);
@@ -443,7 +453,7 @@ describe('Delivery flow', () => {
       await expect(execute()).rejects.toBe(error);
 
       expect(orderRepository.updateStatus).not.toHaveBeenCalled();
-      expect(eventEmitter.emit).not.toHaveBeenCalled();
+      expect(outboxRepository.create).not.toHaveBeenCalled();
       expect(transactionCompleted).toBe(false);
     });
 
@@ -475,12 +485,12 @@ describe('Delivery flow', () => {
         transactionClient
       );
 
-      expect(eventEmitter.emit).not.toHaveBeenCalled();
+      expect(outboxRepository.create).not.toHaveBeenCalled();
       expect(transactionCompleted).toBe(false);
     });
   });
 
-  describe('DeliveryCompleted event', () => {
+  describe('DeliveryCompleted outbox event', () => {
     beforeEach(() => {
       orderRepository.findById.mockResolvedValue({
         id: orderId,
@@ -504,34 +514,64 @@ describe('Delivery flow', () => {
       });
     });
 
-    it('publishes one event with trusted data after the transaction completes', async () => {
-      eventEmitter.emit.mockImplementation(
-        (eventName: string, event: DeliveryCompletedEvent) => {
-          expect(transactionCompleted).toBe(true);
-          expect(eventName).toBe(DELIVERY_COMPLETED_EVENT);
+    it('saves one event with trusted data inside the same transaction', async () => {
+      outboxRepository.create.mockImplementation(
+        async (data: CreateOutboxEventData, tx: typeof transactionClient) => {
+          expect(transactionCompleted).toBe(false);
+          expect(tx).toBe(transactionClient);
 
-          expect(event).toEqual({
-            eventId: expect.any(String),
-            deliveryId,
-            orderId,
-            userId,
-            occurredAt: deliveredAt,
-          });
-
-          expect(event.eventId).toMatch(
+          expect(data.id).toMatch(
             /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
           );
 
-          return true;
+          expect(data).toEqual({
+            id: data.id,
+            type: DELIVERY_COMPLETED_EVENT,
+            payload: {
+              eventId: data.id,
+              deliveryId,
+              orderId,
+              userId,
+              occurredAt: deliveredAt.toISOString(),
+            },
+            occurredAt: deliveredAt,
+          });
         }
       );
 
       await completeDelivery.execute(deliveryId, driverId);
 
-      expect(eventEmitter.emit).toHaveBeenCalledTimes(1);
+      expect(outboxRepository.create).toHaveBeenCalledTimes(1);
+      expect(transactionCompleted).toBe(true);
     });
 
-    it('does not publish when the commit fails after the callback succeeds', async () => {
+    it('rejects the transaction callback when saving the outbox event fails', async () => {
+      const error = new Error('Outbox write failed');
+
+      outboxRepository.create.mockRejectedValue(error);
+
+      await expect(completeDelivery.execute(deliveryId, driverId)).rejects.toBe(
+        error
+      );
+
+      expect(deliveryRepository.markDelivered).toHaveBeenCalledWith(
+        deliveryId,
+        driverId,
+        transactionClient
+      );
+
+      expect(orderRepository.updateStatus).toHaveBeenCalledWith(
+        orderId,
+        OrderStatus.OUT_FOR_DELIVERY,
+        OrderStatus.DELIVERED,
+        transactionClient
+      );
+
+      expect(outboxRepository.create).toHaveBeenCalledTimes(1);
+      expect(transactionCompleted).toBe(false);
+    });
+
+    it('propagates a commit failure after the outbox write was attempted', async () => {
       const commitFailure = new Error('Simulated commit failure');
 
       prisma.$transaction.mockImplementationOnce(
@@ -550,10 +590,18 @@ describe('Delivery flow', () => {
 
       expect(deliveryRepository.markDelivered).toHaveBeenCalled();
       expect(orderRepository.updateStatus).toHaveBeenCalled();
-      expect(eventEmitter.emit).not.toHaveBeenCalled();
+
+      expect(outboxRepository.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: DELIVERY_COMPLETED_EVENT,
+        }),
+        transactionClient
+      );
+
+      expect(transactionCompleted).toBe(false);
     });
 
-    it('rejects a missing deliveredAt without publishing', async () => {
+    it('rejects a missing deliveredAt without saving an outbox event', async () => {
       deliveryRepository.markDelivered.mockResolvedValue({
         id: deliveryId,
         orderId,
@@ -566,7 +614,7 @@ describe('Delivery flow', () => {
         completeDelivery.execute(deliveryId, driverId)
       ).rejects.toThrow('Completed delivery is missing deliveredAt');
 
-      expect(eventEmitter.emit).not.toHaveBeenCalled();
+      expect(outboxRepository.create).not.toHaveBeenCalled();
       expect(transactionCompleted).toBe(false);
     });
   });

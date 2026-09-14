@@ -1,16 +1,20 @@
 import { Module } from '@nestjs/common';
+
 import { AuthModule } from '../auth/auth.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { OrdersModule } from '../orders/orders.module';
-import { CreateDeliveryUseCase } from './application/create-delivery.use-case';
+import { OutboxModule } from '../outbox/outbox.module';
+
 import { DeliveriesController } from './deliveries.controller';
 import { DeliveryRepository } from './delivery.repository';
+
+import { CreateDeliveryUseCase } from './application/create-delivery.use-case';
 import { AssignDriverUseCase } from './application/assign-driver.use-case';
 import { PickupDeliveryUseCase } from './application/pickup-delivery.use-case';
 import { CompleteDeliveryUseCase } from './application/complete-delivery.use-case';
 
 @Module({
-  imports: [AuthModule, PrismaModule, OrdersModule],
+  imports: [AuthModule, PrismaModule, OrdersModule, OutboxModule],
   controllers: [DeliveriesController],
   providers: [
     DeliveryRepository,

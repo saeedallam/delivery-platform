@@ -12,7 +12,9 @@ export class DeliveryCompletedListener {
 
   constructor(private readonly notificationsService: NotificationsService) {}
 
-  @OnEvent(DELIVERY_COMPLETED_EVENT)
+  @OnEvent(DELIVERY_COMPLETED_EVENT, {
+    suppressErrors: false,
+  })
   async handle(event: DeliveryCompletedEvent): Promise<void> {
     const notification =
       await this.notificationsService.notifyDeliveryCompleted(event);

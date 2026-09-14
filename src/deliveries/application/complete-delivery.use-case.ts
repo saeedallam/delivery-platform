@@ -1,5 +1,4 @@
 import { Injectable } from '@nestjs/common';
-import { EventEmitter2 } from '@nestjs/event-emitter';
 import { randomUUID } from 'node:crypto';
 
 import { OrderStatus } from 'generated/prisma/enums';
@@ -18,6 +17,7 @@ import type { DeliveryCompletedEvent } from '../contracts/delivery-completed-eve
 
 import { DeliveryNotFoundError } from '../errors/delivery-not-found.error';
 import { ForbiddenDeliveryAccessError } from '../errors/forbidden-delivery-access.error';
+import { OutboxRepository } from 'src/outbox/outbox.repository';
 
 @Injectable()
 export class CompleteDeliveryUseCase {
@@ -25,11 +25,11 @@ export class CompleteDeliveryUseCase {
     private readonly prisma: PrismaService,
     private readonly deliveryRepository: DeliveryRepository,
     private readonly orderRepository: OrderRepository,
-    private readonly eventEmitter: EventEmitter2
+    private readonly outboxRepository: OutboxRepository
   ) {}
 
   async execute(deliveryId: string, driverId: string): Promise<Delivery> {
-    const { delivery, event } = await this.prisma.$transaction(async (tx) => {
+    return this.prisma.$transaction(async (tx) => {
       const delivery = await this.deliveryRepository.findById(deliveryId, tx);
 
       if (!delivery) {
@@ -78,14 +78,23 @@ export class CompleteDeliveryUseCase {
         occurredAt: completedDelivery.deliveredAt,
       };
 
-      return {
-        delivery: completedDelivery,
-        event,
-      };
+      await this.outboxRepository.create(
+        {
+          id: event.eventId,
+          type: DELIVERY_COMPLETED_EVENT,
+          payload: {
+            eventId: event.eventId,
+            deliveryId: event.deliveryId,
+            orderId: event.orderId,
+            userId: event.userId,
+            occurredAt: event.occurredAt.toISOString(),
+          },
+          occurredAt: event.occurredAt,
+        },
+        tx
+      );
+
+      return completedDelivery;
     });
-
-    this.eventEmitter.emit(DELIVERY_COMPLETED_EVENT, event);
-
-    return delivery;
   }
 }

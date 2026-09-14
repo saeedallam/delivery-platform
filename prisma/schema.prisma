@@ -195,3 +195,20 @@ model Notification {
   @@index([userId, createdAt])
   @@map("notifications")
 }
+
+model OutboxEvent {
+  id      String @id
+  type    String
+  payload Json
+
+  occurredAt DateTime
+  createdAt  DateTime @default(now())
+
+  availableAt DateTime  @default(now())
+  attempts    Int       @default(0)
+  lastError   String?
+  publishedAt DateTime?
+
+  @@index([publishedAt, availableAt, createdAt])
+  @@map("outbox_events")
+}
