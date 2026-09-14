@@ -42,6 +42,8 @@ import { ForbiddenDeliveryAccessError } from '../../deliveries/errors/forbidden-
 import { InvalidDriverRoleError } from '../../deliveries/errors/invalid-driver-role.error';
 import { OrderNotReadyForDeliveryError } from '../../deliveries/errors/order-not-ready-for-delivery.error';
 
+import { NotificationNotFoundError } from '../../notifications/errors/notification-not-found.error';
+
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(GlobalExceptionFilter.name);
@@ -81,7 +83,8 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       exception instanceof ProductNotFoundError ||
       exception instanceof InventoryNotFoundError ||
       exception instanceof DeliveryNotFoundError ||
-      exception instanceof DriverNotFoundError
+      exception instanceof DriverNotFoundError ||
+      exception instanceof NotificationNotFoundError
     ) {
       return response.status(HttpStatus.NOT_FOUND).json({
         statusCode: HttpStatus.NOT_FOUND,

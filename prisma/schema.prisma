@@ -52,6 +52,10 @@ enum DeliveryStatus {
   CANCELLED
 }
 
+enum NotificationType {
+  DELIVERY_COMPLETED
+}
+
 model User {
   id              String           @id @default(uuid())
   email           String           @unique
@@ -171,4 +175,23 @@ model Delivery {
   @@index([driverId])
   @@index([status])
   @@map("deliveries")
+}
+
+model Notification {
+  id      String @id @default(uuid())
+  eventId String @unique
+  userId  String
+  orderId String
+
+  type NotificationType
+
+  title String
+  body  String
+
+  readAt     DateTime?
+  occurredAt DateTime
+  createdAt  DateTime  @default(now())
+
+  @@index([userId, createdAt])
+  @@map("notifications")
 }

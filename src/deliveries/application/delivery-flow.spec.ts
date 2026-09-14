@@ -1,4 +1,5 @@
 import { Test } from '@nestjs/testing';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 
 import { OrderStatus } from 'generated/prisma/enums';
 
@@ -12,6 +13,8 @@ import { OrderStateConflictError } from '../../orders/errors/order-state-conflic
 
 import { DeliveryRepository } from '../delivery.repository';
 import { DeliveryStatus } from '../contracts/delivery-status.enum';
+import { DELIVERY_COMPLETED_EVENT } from '../contracts/delivery-completed-event.interface';
+import type { DeliveryCompletedEvent } from '../contracts/delivery-completed-event.interface';
 
 import { DeliveryAlreadyExistsError } from '../errors/delivery-already-exists.error';
 import { DeliveryNotFoundError } from '../errors/delivery-not-found.error';
@@ -30,7 +33,12 @@ describe('Delivery flow', () => {
   const deliveryId = 'delivery-1';
   const orderId = 'order-1';
   const driverId = 'driver-1';
+  const userId = 'customer-1';
+
+  const deliveredAt = new Date('2026-09-11T10:00:00.000Z');
   const transactionClient = {};
+
+  let transactionCompleted: boolean;
 
   let createDelivery: CreateDeliveryUseCase;
   let assignDriver: AssignDriverUseCase;
@@ -39,6 +47,10 @@ describe('Delivery flow', () => {
 
   let prisma: {
     $transaction: jest.Mock;
+  };
+
+  let eventEmitter: {
+    emit: jest.Mock;
   };
 
   let authService: {
@@ -59,11 +71,24 @@ describe('Delivery flow', () => {
   };
 
   beforeEach(async () => {
+    transactionCompleted = false;
+
     prisma = {
       $transaction: jest.fn(
-        async (callback: (tx: typeof transactionClient) => Promise<unknown>) =>
-          callback(transactionClient)
+        async (
+          callback: (tx: typeof transactionClient) => Promise<unknown>
+        ) => {
+          const result = await callback(transactionClient);
+
+          transactionCompleted = true;
+
+          return result;
+        }
       ),
+    };
+
+    eventEmitter = {
+      emit: jest.fn(),
     };
 
     authService = {
@@ -76,9 +101,12 @@ describe('Delivery flow', () => {
     orderRepository = {
       findById: jest.fn().mockResolvedValue({
         id: orderId,
+        userId,
         status: OrderStatus.PREPARING,
       }),
-      updateStatus: jest.fn().mockResolvedValue({ id: orderId }),
+      updateStatus: jest.fn().mockResolvedValue({
+        id: orderId,
+      }),
     };
 
     deliveryRepository = {
@@ -103,6 +131,10 @@ describe('Delivery flow', () => {
         {
           provide: PrismaService,
           useValue: prisma,
+        },
+        {
+          provide: EventEmitter2,
+          useValue: eventEmitter,
         },
         {
           provide: AuthService,
@@ -138,6 +170,7 @@ describe('Delivery flow', () => {
       await expect(createDelivery.execute(orderId)).resolves.toBe(created);
 
       expect(orderRepository.findById).toHaveBeenCalledWith(orderId);
+
       expect(deliveryRepository.createForOrder).toHaveBeenCalledWith({
         orderId,
       });
@@ -162,6 +195,7 @@ describe('Delivery flow', () => {
     ])('rejects order status %s', async (status) => {
       orderRepository.findById.mockResolvedValue({
         id: orderId,
+        userId,
         status,
       });
 
@@ -196,6 +230,7 @@ describe('Delivery flow', () => {
       );
 
       expect(authService.getUserIdentity).toHaveBeenCalledWith(driverId);
+
       expect(deliveryRepository.assignDriver).toHaveBeenCalledWith(
         deliveryId,
         driverId
@@ -286,6 +321,7 @@ describe('Delivery flow', () => {
     beforeEach(() => {
       orderRepository.findById.mockResolvedValue({
         id: orderId,
+        userId,
         status: expectedOrderStatus,
       });
 
@@ -303,6 +339,7 @@ describe('Delivery flow', () => {
         orderId,
         driverId,
         status: nextDeliveryStatus,
+        deliveredAt: operation === 'complete' ? deliveredAt : null,
       };
 
       writeDelivery().mockResolvedValue(updated);
@@ -333,9 +370,13 @@ describe('Delivery flow', () => {
         nextOrderStatus,
         transactionClient
       );
+
+      if (operation === 'pickup') {
+        expect(eventEmitter.emit).not.toHaveBeenCalled();
+      }
     });
 
-    it('rejects a missing delivery without writes', async () => {
+    it('rejects a missing delivery without writes or events', async () => {
       deliveryRepository.findById.mockResolvedValue(null);
 
       await expect(execute()).rejects.toThrow(DeliveryNotFoundError);
@@ -343,10 +384,11 @@ describe('Delivery flow', () => {
       expect(orderRepository.findById).not.toHaveBeenCalled();
       expect(writeDelivery()).not.toHaveBeenCalled();
       expect(orderRepository.updateStatus).not.toHaveBeenCalled();
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
     });
 
     it.each(['another-driver', null])(
-      'rejects delivery assigned to %s without writes',
+      'rejects delivery assigned to %s without writes or events',
       async (assignedDriverId) => {
         deliveryRepository.findById.mockResolvedValue({
           id: deliveryId,
@@ -360,21 +402,24 @@ describe('Delivery flow', () => {
         expect(orderRepository.findById).not.toHaveBeenCalled();
         expect(writeDelivery()).not.toHaveBeenCalled();
         expect(orderRepository.updateStatus).not.toHaveBeenCalled();
+        expect(eventEmitter.emit).not.toHaveBeenCalled();
       }
     );
 
-    it('rejects a missing order without writes', async () => {
+    it('rejects a missing order without writes or events', async () => {
       orderRepository.findById.mockResolvedValue(null);
 
       await expect(execute()).rejects.toThrow(OrderNotFoundError);
 
       expect(writeDelivery()).not.toHaveBeenCalled();
       expect(orderRepository.updateStatus).not.toHaveBeenCalled();
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
     });
 
-    it('rejects a repeated operation without writes', async () => {
+    it('rejects a repeated operation without writes or events', async () => {
       orderRepository.findById.mockResolvedValue({
         id: orderId,
+        userId,
         status: nextOrderStatus,
       });
 
@@ -387,9 +432,10 @@ describe('Delivery flow', () => {
 
       expect(writeDelivery()).not.toHaveBeenCalled();
       expect(orderRepository.updateStatus).not.toHaveBeenCalled();
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
     });
 
-    it('does not update order when delivery update fails', async () => {
+    it('does not update order or publish when delivery update fails', async () => {
       const error = new DeliveryStateConflictError(deliveryId);
 
       writeDelivery().mockRejectedValue(error);
@@ -397,6 +443,8 @@ describe('Delivery flow', () => {
       await expect(execute()).rejects.toBe(error);
 
       expect(orderRepository.updateStatus).not.toHaveBeenCalled();
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
+      expect(transactionCompleted).toBe(false);
     });
 
     it('rejects the transaction callback when order update fails', async () => {
@@ -404,7 +452,10 @@ describe('Delivery flow', () => {
 
       writeDelivery().mockResolvedValue({
         id: deliveryId,
+        orderId,
+        driverId,
         status: nextDeliveryStatus,
+        deliveredAt: operation === 'complete' ? deliveredAt : null,
       });
 
       orderRepository.updateStatus.mockRejectedValue(error);
@@ -423,6 +474,100 @@ describe('Delivery flow', () => {
         nextOrderStatus,
         transactionClient
       );
+
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
+      expect(transactionCompleted).toBe(false);
+    });
+  });
+
+  describe('DeliveryCompleted event', () => {
+    beforeEach(() => {
+      orderRepository.findById.mockResolvedValue({
+        id: orderId,
+        userId,
+        status: OrderStatus.OUT_FOR_DELIVERY,
+      });
+
+      deliveryRepository.findById.mockResolvedValue({
+        id: deliveryId,
+        orderId,
+        driverId,
+        status: DeliveryStatus.PICKED_UP,
+      });
+
+      deliveryRepository.markDelivered.mockResolvedValue({
+        id: deliveryId,
+        orderId,
+        driverId,
+        status: DeliveryStatus.DELIVERED,
+        deliveredAt,
+      });
+    });
+
+    it('publishes one event with trusted data after the transaction completes', async () => {
+      eventEmitter.emit.mockImplementation(
+        (eventName: string, event: DeliveryCompletedEvent) => {
+          expect(transactionCompleted).toBe(true);
+          expect(eventName).toBe(DELIVERY_COMPLETED_EVENT);
+
+          expect(event).toEqual({
+            eventId: expect.any(String),
+            deliveryId,
+            orderId,
+            userId,
+            occurredAt: deliveredAt,
+          });
+
+          expect(event.eventId).toMatch(
+            /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+          );
+
+          return true;
+        }
+      );
+
+      await completeDelivery.execute(deliveryId, driverId);
+
+      expect(eventEmitter.emit).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not publish when the commit fails after the callback succeeds', async () => {
+      const commitFailure = new Error('Simulated commit failure');
+
+      prisma.$transaction.mockImplementationOnce(
+        async (
+          callback: (tx: typeof transactionClient) => Promise<unknown>
+        ) => {
+          await callback(transactionClient);
+
+          throw commitFailure;
+        }
+      );
+
+      await expect(completeDelivery.execute(deliveryId, driverId)).rejects.toBe(
+        commitFailure
+      );
+
+      expect(deliveryRepository.markDelivered).toHaveBeenCalled();
+      expect(orderRepository.updateStatus).toHaveBeenCalled();
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('rejects a missing deliveredAt without publishing', async () => {
+      deliveryRepository.markDelivered.mockResolvedValue({
+        id: deliveryId,
+        orderId,
+        driverId,
+        status: DeliveryStatus.DELIVERED,
+        deliveredAt: null,
+      });
+
+      await expect(
+        completeDelivery.execute(deliveryId, driverId)
+      ).rejects.toThrow('Completed delivery is missing deliveredAt');
+
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
+      expect(transactionCompleted).toBe(false);
     });
   });
 });
