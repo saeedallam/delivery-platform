@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { OrderStatus } from 'generated/prisma/enums';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { OrderRepository } from '../../orders/order.repository';
@@ -34,13 +35,33 @@ export class HandlePaymentWebhookUseCase {
     }
 
     if (event.type === 'PAYMENT_SUCCEEDED') {
-      await this.paymentRepository.markSucceeded({
-        paymentId: event.paymentId,
-        providerSessionId: event.providerSessionId,
-        providerPaymentId: event.providerPaymentId,
-        amountInMinorUnits: event.amountInMinorUnits,
-        currency: event.currency,
-        paidAt: event.occurredAt,
+      await this.prisma.$transaction(async (tx) => {
+        const payment = await this.paymentRepository.markSucceeded(
+          {
+            paymentId: event.paymentId,
+            providerSessionId: event.providerSessionId,
+            providerPaymentId: event.providerPaymentId,
+            amountInMinorUnits: event.amountInMinorUnits,
+            currency: event.currency,
+            paidAt: event.occurredAt,
+          },
+          tx
+        );
+
+        const order = await this.orderRepository.findById(payment.orderId, tx);
+
+        if (!order) {
+          throw new OrderNotFoundError(payment.orderId);
+        }
+
+        if (order.status === OrderStatus.PENDING) {
+          await this.orderRepository.updateStatus(
+            order.id,
+            OrderStatus.PENDING,
+            OrderStatus.CONFIRMED,
+            tx
+          );
+        }
       });
 
       return;

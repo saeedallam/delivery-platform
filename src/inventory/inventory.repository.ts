@@ -6,6 +6,22 @@ import { Prisma } from 'generated/prisma/client';
 export class InventoryRepository {
   constructor(private readonly prisma: PrismaService) {}
 
+  async create(
+    productId: string,
+    quantity: number,
+    tx?: Prisma.TransactionClient
+  ) {
+    const client = tx ?? this.prisma;
+
+    return client.inventory.create({
+      data: {
+        productId,
+        quantity,
+        reservedQuantity: 0,
+      },
+    });
+  }
+
   async findByProductId(productId: string, tx?: Prisma.TransactionClient) {
     const client = tx ?? this.prisma;
 

@@ -10,6 +10,10 @@ import { Currency } from './contracts/currency.enum';
 export class ProductsService {
   constructor(private readonly productRepository: ProductRepository) {}
 
+  async findActive() {
+    return this.productRepository.findActive();
+  }
+
   async findById(id: string) {
     const product = await this.productRepository.findById(id);
 

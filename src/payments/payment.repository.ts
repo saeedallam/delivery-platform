@@ -109,8 +109,13 @@ export class PaymentRepository {
     return this.mapToPayment(payment);
   }
 
-  async markSucceeded(data: MarkPaymentSucceededData): Promise<Payment> {
-    const result = await this.prisma.payment.updateMany({
+  async markSucceeded(
+    data: MarkPaymentSucceededData,
+    tx?: Prisma.TransactionClient
+  ): Promise<Payment> {
+    const client = tx ?? this.prisma;
+
+    const result = await client.payment.updateMany({
       where: {
         id: data.paymentId,
         amountInMinorUnits: data.amountInMinorUnits,
@@ -142,7 +147,7 @@ export class PaymentRepository {
       throw new PaymentStateConflictError(data.paymentId);
     }
 
-    const payment = await this.prisma.payment.findUnique({
+    const payment = await client.payment.findUnique({
       where: {
         id: data.paymentId,
       },

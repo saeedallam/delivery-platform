@@ -1,4 +1,5 @@
 import { Test } from '@nestjs/testing';
+import { OrderStatus } from 'generated/prisma/enums';
 
 import { Currency } from '../../catalog/contracts/currency.enum';
 import { InventoryReleaseConflictError } from '../../inventory/errors/inventory-release-conflict.error';
@@ -104,6 +105,7 @@ describe('Payment flow use cases', () => {
 
   let orderRepository: {
     findById: jest.Mock;
+    updateStatus: jest.Mock;
   };
 
   let paymentRepository: {
@@ -141,6 +143,7 @@ describe('Payment flow use cases', () => {
 
     orderRepository = {
       findById: jest.fn(),
+      updateStatus: jest.fn(),
     };
 
     paymentRepository = {
@@ -300,24 +303,72 @@ describe('Payment flow use cases', () => {
       expect(prisma.$transaction).not.toHaveBeenCalled();
     });
 
-    it('marks payment as succeeded using verified provider data', async () => {
+    it('marks payment as succeeded and confirms the order using the same transaction', async () => {
       paymentGateway.verifyAndParseWebhookEvent.mockReturnValue(succeededEvent);
 
       paymentRepository.markSucceeded.mockResolvedValue(succeededPayment);
 
-      await handlePaymentWebhookUseCase.execute(rawBody, signature);
-
-      expect(paymentRepository.markSucceeded).toHaveBeenCalledWith({
-        paymentId: 'payment-1',
-        providerSessionId: 'cs_test_1',
-        providerPaymentId: 'pi_1',
-        amountInMinorUnits: 1000,
-        currency: Currency.USD,
-        paidAt: occurredAt,
+      orderRepository.findById.mockResolvedValue({
+        id: 'order-1',
+        status: OrderStatus.PENDING,
       });
 
-      expect(prisma.$transaction).not.toHaveBeenCalled();
+      await handlePaymentWebhookUseCase.execute(rawBody, signature);
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+
+      expect(paymentRepository.markSucceeded).toHaveBeenCalledWith(
+        {
+          paymentId: 'payment-1',
+          providerSessionId: 'cs_test_1',
+          providerPaymentId: 'pi_1',
+          amountInMinorUnits: 1000,
+          currency: Currency.USD,
+          paidAt: occurredAt,
+        },
+        transactionClient
+      );
+
+      expect(orderRepository.findById).toHaveBeenCalledWith(
+        'order-1',
+        transactionClient
+      );
+
+      expect(orderRepository.updateStatus).toHaveBeenCalledWith(
+        'order-1',
+        OrderStatus.PENDING,
+        OrderStatus.CONFIRMED,
+        transactionClient
+      );
+
       expect(inventoryRepository.releaseStock).not.toHaveBeenCalled();
+    });
+
+    it('does not re-confirm order if it is already confirmed on webhook retry', async () => {
+      paymentGateway.verifyAndParseWebhookEvent.mockReturnValue(succeededEvent);
+
+      paymentRepository.markSucceeded.mockResolvedValue(succeededPayment);
+
+      orderRepository.findById.mockResolvedValue({
+        id: 'order-1',
+        status: OrderStatus.CONFIRMED,
+      });
+
+      await handlePaymentWebhookUseCase.execute(rawBody, signature);
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+
+      expect(paymentRepository.markSucceeded).toHaveBeenCalledWith(
+        expect.anything(),
+        transactionClient
+      );
+
+      expect(orderRepository.findById).toHaveBeenCalledWith(
+        'order-1',
+        transactionClient
+      );
+
+      expect(orderRepository.updateStatus).not.toHaveBeenCalled();
     });
 
     it('expires payment and releases every order item using the same transaction', async () => {
